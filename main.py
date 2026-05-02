@@ -1,7 +1,6 @@
 import os
 import html
 import time
-import random
 from datetime import datetime, timedelta
 
 import feedparser
@@ -41,16 +40,13 @@ BAD_WORDS = [
     "грязная вода", "плохая вода", "канализация", "отключение воды",
     "навальный", "санкции", "трамп", "иран", "украин",
     "наркот", "алкогол", "пьяный", "избил", "розыск",
-
     "подписк", "забрать", "промокод", "скидк", "акция", "реклама",
     "наш чат", "мы в max", "прислать новость", "ссылка ниже",
     "обход", "глушил", "мобильного интернета", "vpn", "заработок",
-
     "продается", "продаётся", "продам", "куплю", "аренда", "сдается",
     "сдаётся", "квартира", "однокомнатная", "двухкомнатная",
     "трехкомнатная", "трёхкомнатная", "комнат", "цена", "ипотека",
     "дом кирпичный", "санузел", "балкон",
-
     "обсудили", "заявил", "заявила", "заявили", "пригрозил",
     "правительство", "министр", "депутат", "госдума", "совещание",
     "санкц", "переговор", "конфликт",
@@ -95,7 +91,7 @@ def clean_text(text):
     return " ".join(text.replace("\n", " ").replace("\r", " ").split())
 
 
-def short_text(text, limit=420):
+def short_text(text, limit=360):
     text = clean_text(text)
 
     if len(text) <= limit:
@@ -104,7 +100,7 @@ def short_text(text, limit=420):
     cut = text[:limit]
     last_dot = max(cut.rfind("."), cut.rfind("!"), cut.rfind("?"))
 
-    if last_dot > 160:
+    if last_dot > 140:
         return cut[:last_dot + 1]
 
     return cut.rstrip() + "…"
@@ -128,10 +124,6 @@ def is_bad(text):
         return True
 
     return False
-
-
-def is_too_long_for_telegram_source(text):
-    return len(text) > 650
 
 
 def is_recent_entry(entry, max_days=21):
@@ -180,12 +172,39 @@ def score_news(title, summary, source):
     return score
 
 
+def verdict_for_item(item):
+    title = item["title"].lower()
+    summary = item.get("summary", "").lower()
+    text = f"{title} {summary}"
+
+    if item["local"]:
+        return "🟢 Да. Местная тема, хорошо подходит Митричу."
+
+    if any(word in text for word in ["история", "археолог", "монет", "музей", "ретро", "золотое кольцо"]):
+        return "🟢 Да. Можно красиво подать через историю и любопытство."
+
+    if any(word in text for word in ["наука", "учёные", "ученые", "животн", "космос", "необыч"]):
+        return "🟡 Можно. Хорошо как лёгкая разбавка."
+
+    return "🟡 Спорно. Можно брать, если не найдётся темы сильнее."
+
+
+def explain_item(item):
+    title = item["title"]
+    summary = item.get("summary", "")
+
+    if summary:
+        return short_text(summary, 360)
+
+    return short_text(title, 260)
+
+
 def get_entry_summary(entry):
     summary = getattr(entry, "summary", "")
     if not summary:
         summary = getattr(entry, "description", "")
 
-    return short_text(summary, 420)
+    return short_text(summary, 360)
 
 
 def get_telegram_news():
@@ -215,14 +234,14 @@ def get_telegram_news():
                 if not full_text or len(full_text) < 40:
                     continue
 
-                if is_too_long_for_telegram_source(full_text):
+                if len(full_text) > 650:
                     continue
 
                 if is_bad(full_text):
                     continue
 
-                title = short_text(full_text, 130)
-                summary = short_text(full_text, 420)
+                title = short_text(full_text, 120)
+                summary = short_text(full_text, 360)
 
                 link = url
                 if link_block and link_block.get("href"):
@@ -327,7 +346,6 @@ def collect_news():
     other_items.sort(key=lambda x: x["score"], reverse=True)
 
     result = []
-
     result.extend(local_items[:2])
 
     for item in other_items:
@@ -349,62 +367,62 @@ def build_message(items):
 
     if not items:
         return (
-            f"☕ <b>Дайджест Митрича — {today}</b>\n\n"
-            "Сегодня нормальных новостей почти не попалось.\n"
-            "Ленты шумят, а брать особо нечего.\n\n"
-            "Подождём улов получше."
+            f"☕ <b>Редакторский дайджест Митрича — {today}</b>\n\n"
+            "Сегодня нормальных тем почти не попалось.\n"
+            "Лучше пропустить, чем делать выпуск из мусора."
         )
 
     lines = [
-        f"☕ <b>Дайджест Митрича — {today}</b>",
+        f"☕ <b>Редакторский дайджест Митрича — {today}</b>",
         "",
-        "Собрал новости с коротким раскрытием, чтобы можно было быстро выбрать, что брать в сценарий.",
+        "Пошуршал по лентам. Ниже — темы, из которых можно лепить выпуск.",
         "",
     ]
 
-    links = ["", "<b>Источники:</b>"]
     counter = 1
 
     local_items = [item for item in items if item["local"]]
     other_items = [item for item in items if not item["local"]]
 
     if local_items:
-        lines.append("<b>Из наших краёв:</b>")
+        lines.append("<b>Из наших краёв</b>")
         lines.append("")
 
         for item in local_items:
             title = html.escape(item["title"])
-            summary = html.escape(item.get("summary", ""))
-
-            lines.append(f"{counter}. <b>{title}</b>")
-            if summary:
-                lines.append(summary)
-            lines.append("")
-
+            summary = html.escape(explain_item(item))
+            verdict = html.escape(verdict_for_item(item))
             link = html.escape(item["link"])
             source = html.escape(item["source"])
-            links.append(f"{counter}. <a href=\"{link}\">{source}</a>")
+
+            lines.append(f"🟢 <b>{counter}. Что нашёл:</b> {title}")
+            lines.append(f"<b>Суть:</b> {summary}")
+            lines.append(f"<b>Можно брать:</b> {verdict}")
+            lines.append(f"<b>Источник:</b> <a href=\"{link}\">{source}</a>")
+            lines.append("")
             counter += 1
 
     if other_items:
-        lines.append("<b>Для разбавки:</b>")
+        lines.append("<b>Для разбавки</b>")
         lines.append("")
 
         for item in other_items:
             title = html.escape(item["title"])
-            summary = html.escape(item.get("summary", ""))
-
-            lines.append(f"{counter}. <b>{title}</b>")
-            if summary:
-                lines.append(summary)
-            lines.append("")
-
+            summary = html.escape(explain_item(item))
+            verdict = html.escape(verdict_for_item(item))
             link = html.escape(item["link"])
             source = html.escape(item["source"])
-            links.append(f"{counter}. <a href=\"{link}\">{source}</a>")
+
+            lines.append(f"🟡 <b>{counter}. Что нашёл:</b> {title}")
+            lines.append(f"<b>Суть:</b> {summary}")
+            lines.append(f"<b>Можно брать:</b> {verdict}")
+            lines.append(f"<b>Источник:</b> <a href=\"{link}\">{source}</a>")
+            lines.append("")
             counter += 1
 
-    return "\n".join(lines + links)
+    lines.append("Выбирай 1–2 темы — из них уже можно делать голос Митрича.")
+
+    return "\n".join(lines)
 
 
 def send_message(text):
