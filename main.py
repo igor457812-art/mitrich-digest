@@ -44,7 +44,7 @@ def get_news():
     lines.append(f"☕ <b>Дайджест Митрича</b> — {datetime.now().strftime('%d.%m.%Y')}\n")
     for name, url in FEEDS:
         feed = feedparser.parse(url)
-        entries = feed.entries[:2]
+        entries = feed.entries[:3]
         if entries:
             lines.append(f"\n<b>{name}:</b>")
             for e in entries:
