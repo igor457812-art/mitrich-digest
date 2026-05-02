@@ -23,7 +23,7 @@ FEEDS = [
     ("РИА — Общество", "https://ria.ru/export/rss2/society/index.xml"),
     ("РИА — Наука", "https://ria.ru/export/rss2/science/index.xml"),
     ("РИА — Регионы", "https://ria.ru/export/rss2/region_other/index.xml"),
-    ("ТАСС — Общество", "https://tass.com/rss/v2.xml"),
+    ("РБК", "https://rss.rbk.ru/v1/get/all"),
     ("Naked Science", "https://naked-science.ru/feed"),
     ("Хайтек", "https://hightech.fm/feed"),
     # Тверь и Кашин
