@@ -1,9 +1,10 @@
+import os
 import feedparser
 import requests
 from datetime import datetime
 
-BOT_TOKEN = "8676689810:AAHqnbC2_fpsGwhfRqHAlKbv61G3XhYricw"
-CHAT_ID = "511177080"
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+CHAT_ID = os.environ.get("CHAT_ID")
 
 FEEDS = [
     # Федеральные
