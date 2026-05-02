@@ -1,7 +1,8 @@
 import os
 import html
 import time
-from datetime import datetime
+import random
+from datetime import datetime, timedelta
 
 import feedparser
 import requests
@@ -44,7 +45,24 @@ BAD_WORDS = [
     "коррупц", "мошенник", "штраф", "воровств", "украл", "краж",
     "грязная вода", "плохая вода", "канализация", "отключение воды",
     "навальный", "санкции", "трамп", "иран", "украин",
+    "наркот", "алкогол", "пьяный", "избил", "розыск",
 ]
+
+
+SEASON_BAD_MONTHS = {
+    1: [],
+    2: [],
+    3: ["ёлка", "елка", "дед мороз", "новый год"],
+    4: ["ёлка", "елка", "дед мороз", "новый год"],
+    5: ["ёлка", "елка", "дед мороз", "новый год"],
+    6: ["ёлка", "елка", "дед мороз", "новый год"],
+    7: ["ёлка", "елка", "дед мороз", "новый год"],
+    8: ["ёлка", "елка", "дед мороз", "новый год"],
+    9: ["ёлка", "елка", "дед мороз", "новый год"],
+    10: [],
+    11: [],
+    12: [],
+}
 
 
 GOOD_WORDS = [
@@ -54,18 +72,62 @@ GOOD_WORDS = [
     "необыч", "редк", "курьёз", "курьез", "интересн",
     "дети", "школ", "учитель", "культура", "театр", "книга",
     "добровол", "помог", "открыли", "создали", "изобрели",
-    "елк", "ёлк", "площад", "дорог", "ремонт", "золотое кольцо",
-    "туризм", "турист", "благоустр", "конкурс",
+    "площад", "дорог", "ремонт", "золотое кольцо",
+    "туризм", "турист", "благоустр", "конкурс", "природ", "река",
+]
+
+
+INTRO_VARIANTS = [
+    "Покопался тут немного — вот что интересного вылезло.",
+    "Посмотрел, что там в новостях. Отобрал без истерики.",
+    "Пошуршал по интернету. Есть пара любопытных вещей.",
+    "Новости сегодня разные, но кое-что нормальное нашлось.",
+    "Собрал для вас то, что можно читать без валерьянки.",
+    "Митрич полистал ленты и отмёл лишний шум.",
+    "Вот что сегодня попалось из более-менее человеческого.",
+]
+
+
+ENDING_VARIANTS = [
+    "Вот такой сегодня улов.",
+    "Остальное — шум, его в печку.",
+    "Если коротко — день без сенсаций, но посмотреть есть на что.",
+    "На этом пока всё. Митрич пошёл дальше копаться.",
+    "Такие дела. Не всё же нам тревогу читать.",
 ]
 
 
 def clean_title(title):
-    return " ".join(title.replace("\n", " ").split())
+    return " ".join(title.replace("\n", " ").replace("\r", " ").split())
 
 
 def is_bad(title):
     text = title.lower()
-    return any(word in text for word in BAD_WORDS)
+
+    if any(word in text for word in BAD_WORDS):
+        return True
+
+    current_month = datetime.now().month
+    seasonal_bad_words = SEASON_BAD_MONTHS.get(current_month, [])
+
+    if any(word in text for word in seasonal_bad_words):
+        return True
+
+    return False
+
+
+def is_recent_entry(entry, max_days=21):
+    published = getattr(entry, "published_parsed", None)
+    updated = getattr(entry, "updated_parsed", None)
+    date_struct = published or updated
+
+    if not date_struct:
+        return True
+
+    entry_date = datetime(*date_struct[:6])
+    min_date = datetime.utcnow() - timedelta(days=max_days)
+
+    return entry_date >= min_date
 
 
 def score_news(title, source):
@@ -77,24 +139,64 @@ def score_news(title, source):
             score += 2
 
     if "каш" in text:
-        score += 8
+        score += 10
 
     if "каляз" in text:
-        score += 4
+        score += 5
 
     if "твер" in text:
         score += 3
 
     if "монет" in text or "археолог" in text or "история" in text:
-        score += 4
+        score += 5
 
     if "золотое кольцо" in text or "туризм" in text:
-        score += 4
+        score += 5
 
     if "наука" in source.lower() or "naked science" in source.lower() or "хайтек" in source.lower():
         score += 2
 
     return score
+
+
+def make_mitrich_line(title):
+    text = clean_title(title)
+
+    replacements = [
+        ("В Тверской области ", "В Тверской области "),
+        ("стало известно", "пишут"),
+        ("сообщили", "пишут"),
+        ("рассказали", "рассказывают"),
+        ("назвали", "назвали"),
+    ]
+
+    for old, new in replacements:
+        text = text.replace(old, new)
+
+    starters = [
+        "Тут пишут: ",
+        "Попалось такое: ",
+        "Есть вот такая новость: ",
+        "А вот это занятно: ",
+        "Вот ещё интересное: ",
+        "Гляньте, что нашлось: ",
+    ]
+
+    comments = [
+        "Нормальная тема, без лишней паники.",
+        "Такое уже можно спокойно читать.",
+        "Не сенсация века, но любопытно.",
+        "Для маленьких городов такие вещи важны.",
+        "Вот это ближе к жизни.",
+        "Записал в хорошие находки.",
+    ]
+
+    starter = random.choice(starters)
+
+    if random.random() < 0.45:
+        return f"{starter}{text}. {random.choice(comments)}"
+
+    return f"{starter}{text}."
 
 
 def get_telegram_news():
@@ -110,19 +212,29 @@ def get_telegram_news():
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, "html.parser")
-            messages = soup.select(".tgme_widget_message_text")
+            messages = soup.select(".tgme_widget_message")
 
-            for msg in messages[-12:]:
-                text = msg.get_text(" ", strip=True)
+            for message in messages[-12:]:
+                text_block = message.select_one(".tgme_widget_message_text")
+                link_block = message.select_one(".tgme_widget_message_date")
+
+                if not text_block:
+                    continue
+
+                text = text_block.get_text(" ", strip=True)
                 text = clean_title(text)
 
                 if not text or len(text) < 40:
                     continue
 
+                link = url
+                if link_block and link_block.get("href"):
+                    link = link_block.get("href")
+
                 items.append({
                     "source": source_name,
-                    "title": text[:250],
-                    "link": url,
+                    "title": text[:280],
+                    "link": link,
                 })
 
         except Exception as error:
@@ -140,6 +252,9 @@ def collect_news():
             feed = feedparser.parse(feed_url)
 
             for entry in feed.entries[:8]:
+                if not is_recent_entry(entry):
+                    continue
+
                 title = clean_title(getattr(entry, "title", ""))
                 link = getattr(entry, "link", "")
 
@@ -200,7 +315,7 @@ def collect_news():
         })
 
     items.sort(key=lambda x: x["score"], reverse=True)
-    return items[:7]
+    return items[:5]
 
 
 def build_message(items):
@@ -209,31 +324,33 @@ def build_message(items):
     if not items:
         return (
             f"☕ <b>Дайджест Митрича — {today}</b>\n\n"
-            "Покопался я тут в интернете…\n"
-            "но сегодня ничего приличного не нашёл.\n"
-            "Один шум да суета."
+            "Покопался я тут по лентам, но сегодня ничего приличного не нашёл.\n"
+            "То шум, то тревога, то вообще майская ёлка из прошлого года.\n\n"
+            "Подождём нормальных новостей."
         )
 
-    intro = [
+    lines = [
         f"☕ <b>Дайджест Митрича — {today}</b>",
         "",
-        "Покопался я тут на своём втором пентюме…",
-        "в интернете кое-что интересное нашёл:",
+        random.choice(INTRO_VARIANTS),
         "",
     ]
 
-    news_lines = []
-    links_lines = ["", "<b>Откуда это всё:</b>"]
+    links = ["", "<b>Источники, чтобы всё было по-честному:</b>"]
 
     for i, item in enumerate(items, 1):
-        title = html.escape(item["title"])
+        title = html.escape(make_mitrich_line(item["title"]))
         link = html.escape(item["link"])
         source = html.escape(item["source"])
 
-        news_lines.append(f"{i}. {title}")
-        links_lines.append(f"{i}. <a href=\"{link}\">{source}</a>")
+        lines.append(f"{i}. {title}")
+        lines.append("")
 
-    return "\n".join(intro + news_lines + links_lines)
+        links.append(f"{i}. <a href=\"{link}\">{source}</a>")
+
+    lines.append(random.choice(ENDING_VARIANTS))
+
+    return "\n".join(lines + links)
 
 
 def send_message(text):
