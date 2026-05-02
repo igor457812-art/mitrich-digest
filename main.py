@@ -48,7 +48,7 @@ def get_news():
         if entries:
             lines.append(f"\n<b>{name}:</b>")
             for e in entries:
-                lines.append(f"• {e.title}")
+              lines.append(f"• <a href='{e.link}'>{e.title}</a>")
     return "\n".join(lines)
 
 if __name__ == "__main__":
