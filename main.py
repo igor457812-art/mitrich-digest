@@ -5,6 +5,7 @@ from datetime import datetime
 
 import feedparser
 import requests
+from bs4 import BeautifulSoup
 
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -25,9 +26,12 @@ FEEDS = [
     ("Хайтек", "https://hightech.fm/feed"),
 
     ("Кашин — новости", "https://news.google.com/rss/search?q=Кашин+Тверская+область&hl=ru&gl=RU&ceid=RU:ru"),
-    ("Тверь — новости", "https://news.google.com/rss/search?q=Тверь+новости&hl=ru&gl=RU&ceid=RU:ru"),
-    ("Малые города", "https://news.google.com/rss/search?q=малый+город+Россия+событие&hl=ru&gl=RU&ceid=RU:ru"),
-    ("Курьёзы России", "https://news.google.com/rss/search?q=необычное+Россия+курьёз&hl=ru&gl=RU&ceid=RU:ru"),
+    ("Калязин и Кашин", "https://news.google.com/rss/search?q=Калязин+Кашин+новости&hl=ru&gl=RU&ceid=RU:ru"),
+]
+
+
+TELEGRAM_CHANNELS = [
+    ("Калязин & Кашин: News", "https://t.me/s/pvk_69"),
 ]
 
 
@@ -37,20 +41,26 @@ BAD_WORDS = [
     "авария", "дтп", "сбил", "пожар", "взрыв", "теракт",
     "война", "ракета", "обстрел", "бпла", "дрон", "фронт",
     "суд", "приговор", "арест", "задержан", "уголовн",
-    "коррупц", "мошенник", "штраф",
+    "коррупц", "мошенник", "штраф", "воровств", "украл", "краж",
     "грязная вода", "плохая вода", "канализация", "отключение воды",
     "навальный", "санкции", "трамп", "иран", "украин",
 ]
 
 
 GOOD_WORDS = [
-    "каш", "твер", "город", "музей", "выставка", "фестиваль", "праздник",
-    "история", "археолог", "нашли", "обнаружили", "раскоп", "монет",
-    "наука", "учёные", "ученые", "космос", "планет", "животн",
+    "каш", "каляз", "твер", "город", "музей", "выставка", "фестиваль",
+    "праздник", "история", "археолог", "нашли", "обнаружили", "раскоп",
+    "монет", "наука", "учёные", "ученые", "космос", "планет", "животн",
     "необыч", "редк", "курьёз", "курьез", "интересн",
     "дети", "школ", "учитель", "культура", "театр", "книга",
     "добровол", "помог", "открыли", "создали", "изобрели",
+    "елк", "ёлк", "площад", "дорог", "ремонт", "золотое кольцо",
+    "туризм", "турист", "благоустр", "конкурс",
 ]
+
+
+def clean_title(title):
+    return " ".join(title.replace("\n", " ").split())
 
 
 def is_bad(title):
@@ -67,12 +77,18 @@ def score_news(title, source):
             score += 2
 
     if "каш" in text:
-        score += 6
+        score += 8
+
+    if "каляз" in text:
+        score += 4
 
     if "твер" in text:
         score += 3
 
     if "монет" in text or "археолог" in text or "история" in text:
+        score += 4
+
+    if "золотое кольцо" in text or "туризм" in text:
         score += 4
 
     if "наука" in source.lower() or "naked science" in source.lower() or "хайтек" in source.lower():
@@ -81,8 +97,38 @@ def score_news(title, source):
     return score
 
 
-def clean_title(title):
-    return " ".join(title.replace("\n", " ").split())
+def get_telegram_news():
+    items = []
+
+    for source_name, url in TELEGRAM_CHANNELS:
+        try:
+            response = requests.get(
+                url,
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=20,
+            )
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.text, "html.parser")
+            messages = soup.select(".tgme_widget_message_text")
+
+            for msg in messages[-12:]:
+                text = msg.get_text(" ", strip=True)
+                text = clean_title(text)
+
+                if not text or len(text) < 40:
+                    continue
+
+                items.append({
+                    "source": source_name,
+                    "title": text[:250],
+                    "link": url,
+                })
+
+        except Exception as error:
+            print(f"Ошибка Telegram-канала {source_name}: {error}")
+
+    return items
 
 
 def collect_news():
@@ -127,6 +173,32 @@ def collect_news():
         except Exception as error:
             print(f"Ошибка источника {source_name}: {error}")
 
+    tg_items = get_telegram_news()
+
+    for item in tg_items:
+        title = item["title"]
+        title_key = title.lower()
+
+        if title_key in seen_titles:
+            continue
+
+        seen_titles.add(title_key)
+
+        if is_bad(title):
+            continue
+
+        score = score_news(title, item["source"])
+
+        if score <= 0:
+            continue
+
+        items.append({
+            "source": item["source"],
+            "title": title,
+            "link": item["link"],
+            "score": score,
+        })
+
     items.sort(key=lambda x: x["score"], reverse=True)
     return items[:7]
 
@@ -152,6 +224,7 @@ def build_message(items):
         title = html.escape(item["title"])
         link = html.escape(item["link"])
         source = html.escape(item["source"])
+
         lines.append(f"• <a href=\"{link}\">{title}</a>")
         lines.append(f"  <i>{source}</i>")
         lines.append("")
