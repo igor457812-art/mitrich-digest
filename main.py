@@ -6,10 +6,19 @@ BOT_TOKEN = "8676689810:AAHqnbC2_fpsGwhfRqHAlKbv61G3XhYricw"
 CHAT_ID = "511177080"
 
 FEEDS = [
+    # Федеральные
     ("Лента.ру", "https://lenta.ru/rss"),
     ("РИА Новости", "https://ria.ru/export/rss2/index.xml"),
     ("Газета.ру", "https://www.gazeta.ru/export/rss/first.xml"),
     ("Meduza", "https://meduza.io/rss/all"),
+    ("ТАСС", "https://tass.com/rss/v2.xml"),
+    ("Коммерсант", "https://www.kommersant.ru/RSS/main.xml"),
+    ("МК", "https://www.mk.ru/rss/index.xml"),
+    ("Российская газета", "https://rg.ru/xml/index.xml"),
+    # Тверь и Кашин через Google News
+    ("Кашин — новости", "https://news.google.com/rss/search?q=Кашин+Тверская+область&hl=ru&gl=RU&ceid=RU:ru"),
+    ("Тверь — новости", "https://news.google.com/rss/search?q=Тверь+новости&hl=ru&gl=RU&ceid=RU:ru"),
+    ("Кашин — события", "https://news.google.com/rss/search?q=Кашин+город&hl=ru&gl=RU&ceid=RU:ru"),
 ]
 
 def send_message(text):
