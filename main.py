@@ -86,28 +86,28 @@ GOOD_WORDS = [
 ]
 
 
-INTRO_VARIANTS = [
-    "Покопался тут немного — вот что интересного вылезло.",
-    "Посмотрел, что там в новостях. Отобрал без истерики.",
-    "Пошуршал по интернету. Есть пара любопытных вещей.",
-    "Новости сегодня разные, но кое-что нормальное нашлось.",
-    "Собрал для вас то, что можно читать без валерьянки.",
-    "Митрич полистал ленты и отмёл лишний шум.",
-    "Вот что сегодня попалось из более-менее человеческого.",
-]
+def clean_text(text):
+    if not text:
+        return ""
+
+    text = BeautifulSoup(str(text), "html.parser").get_text(" ", strip=True)
+    text = html.unescape(text)
+    return " ".join(text.replace("\n", " ").replace("\r", " ").split())
 
 
-ENDING_VARIANTS = [
-    "Вот такой сегодня улов.",
-    "Остальное — шум, его в печку.",
-    "Если коротко — день без сенсаций, но посмотреть есть на что.",
-    "На этом пока всё. Митрич пошёл дальше копаться.",
-    "Такие дела. Не всё же нам тревогу читать.",
-]
+def short_text(text, limit=420):
+    text = clean_text(text)
 
+    if len(text) <= limit:
+        return text
 
-def clean_title(title):
-    return " ".join(title.replace("\n", " ").replace("\r", " ").split())
+    cut = text[:limit]
+    last_dot = max(cut.rfind("."), cut.rfind("!"), cut.rfind("?"))
+
+    if last_dot > 160:
+        return cut[:last_dot + 1]
+
+    return cut.rstrip() + "…"
 
 
 def is_local(title):
@@ -115,8 +115,8 @@ def is_local(title):
     return "каш" in text or "каляз" in text or "твер" in text
 
 
-def is_bad(title):
-    text = title.lower()
+def is_bad(text):
+    text = text.lower()
 
     if any(word in text for word in BAD_WORDS):
         return True
@@ -131,7 +131,7 @@ def is_bad(title):
 
 
 def is_too_long_for_telegram_source(text):
-    return len(text) > 220
+    return len(text) > 650
 
 
 def is_recent_entry(entry, max_days=21):
@@ -148,8 +148,8 @@ def is_recent_entry(entry, max_days=21):
     return entry_date >= min_date
 
 
-def score_news(title, source):
-    text = f"{title} {source}".lower()
+def score_news(title, summary, source):
+    text = f"{title} {summary} {source}".lower()
     score = 0
 
     for word in GOOD_WORDS:
@@ -180,40 +180,12 @@ def score_news(title, source):
     return score
 
 
-def make_mitrich_line(title, local=False):
-    text = clean_title(title)
+def get_entry_summary(entry):
+    summary = getattr(entry, "summary", "")
+    if not summary:
+        summary = getattr(entry, "description", "")
 
-    if local:
-        starters = [
-            "Из наших краёв: ",
-            "По Кашину и рядом попалось: ",
-            "Местное нашлось такое: ",
-            "Вот из ближнего: ",
-        ]
-        comments = [
-            "Такое Митрич отдельно записал.",
-            "Это уже ближе к дому.",
-            "За такими новостями и следим.",
-            "Вот это в нашу копилку.",
-        ]
-    else:
-        starters = [
-            "А из большого интернета вот что: ",
-            "Для разбавки — интересная штука: ",
-            "Ещё попалось занятное: ",
-            "Из не местного, но любопытного: ",
-        ]
-        comments = [
-            "Не сенсация века, но любопытно.",
-            "Такое уже можно спокойно читать.",
-            "Хоть какая-то польза от интернета.",
-            "Записал в хорошие находки.",
-        ]
-
-    if random.random() < 0.45:
-        return f"{random.choice(starters)}{text}. {random.choice(comments)}"
-
-    return f"{random.choice(starters)}{text}."
+    return short_text(summary, 420)
 
 
 def get_telegram_news():
@@ -238,16 +210,19 @@ def get_telegram_news():
                 if not text_block:
                     continue
 
-                text = clean_title(text_block.get_text(" ", strip=True))
+                full_text = clean_text(text_block.get_text(" ", strip=True))
 
-                if not text or len(text) < 40:
+                if not full_text or len(full_text) < 40:
                     continue
 
-                if is_too_long_for_telegram_source(text):
+                if is_too_long_for_telegram_source(full_text):
                     continue
 
-                if is_bad(text):
+                if is_bad(full_text):
                     continue
+
+                title = short_text(full_text, 130)
+                summary = short_text(full_text, 420)
 
                 link = url
                 if link_block and link_block.get("href"):
@@ -255,7 +230,8 @@ def get_telegram_news():
 
                 items.append({
                     "source": source_name,
-                    "title": text,
+                    "title": title,
+                    "summary": summary,
                     "link": link,
                 })
 
@@ -277,10 +253,16 @@ def collect_news():
                 if not is_recent_entry(entry):
                     continue
 
-                title = clean_title(getattr(entry, "title", ""))
+                title = clean_text(getattr(entry, "title", ""))
                 link = getattr(entry, "link", "")
+                summary = get_entry_summary(entry)
 
                 if not title or not link:
+                    continue
+
+                check_text = f"{title} {summary}"
+
+                if is_bad(check_text):
                     continue
 
                 title_key = title.lower()
@@ -290,10 +272,7 @@ def collect_news():
 
                 seen_titles.add(title_key)
 
-                if is_bad(title):
-                    continue
-
-                score = score_news(title, source_name)
+                score = score_news(title, summary, source_name)
 
                 if score <= 0:
                     continue
@@ -301,6 +280,7 @@ def collect_news():
                 items.append({
                     "source": source_name,
                     "title": title,
+                    "summary": summary,
                     "link": link,
                     "score": score,
                     "local": is_local(title),
@@ -313,6 +293,7 @@ def collect_news():
 
     for item in get_telegram_news():
         title = item["title"]
+        summary = item["summary"]
         title_key = title.lower()
 
         if title_key in seen_titles:
@@ -320,10 +301,12 @@ def collect_news():
 
         seen_titles.add(title_key)
 
-        if is_bad(title):
+        check_text = f"{title} {summary}"
+
+        if is_bad(check_text):
             continue
 
-        score = score_news(title, item["source"])
+        score = score_news(title, summary, item["source"])
 
         if score <= 0:
             continue
@@ -331,6 +314,7 @@ def collect_news():
         items.append({
             "source": item["source"],
             "title": title,
+            "summary": summary,
             "link": item["link"],
             "score": score,
             "local": is_local(title),
@@ -366,31 +350,35 @@ def build_message(items):
     if not items:
         return (
             f"☕ <b>Дайджест Митрича — {today}</b>\n\n"
-            "Покопался я тут по лентам, но сегодня ничего приличного не нашёл.\n"
-            "То шум, то тревога, то вообще майская ёлка из прошлого года.\n\n"
-            "Подождём нормальных новостей."
+            "Сегодня нормальных новостей почти не попалось.\n"
+            "Ленты шумят, а брать особо нечего.\n\n"
+            "Подождём улов получше."
         )
-
-    local_items = [item for item in items if item["local"]]
-    other_items = [item for item in items if not item["local"]]
 
     lines = [
         f"☕ <b>Дайджест Митрича — {today}</b>",
         "",
-        random.choice(INTRO_VARIANTS),
+        "Собрал новости с коротким раскрытием, чтобы можно было быстро выбрать, что брать в сценарий.",
         "",
     ]
 
-    links = ["", "<b>Источники, чтобы всё было по-честному:</b>"]
+    links = ["", "<b>Источники:</b>"]
     counter = 1
+
+    local_items = [item for item in items if item["local"]]
+    other_items = [item for item in items if not item["local"]]
 
     if local_items:
         lines.append("<b>Из наших краёв:</b>")
         lines.append("")
 
         for item in local_items:
-            title = html.escape(make_mitrich_line(item["title"], local=True))
-            lines.append(f"{counter}. {title}")
+            title = html.escape(item["title"])
+            summary = html.escape(item.get("summary", ""))
+
+            lines.append(f"{counter}. <b>{title}</b>")
+            if summary:
+                lines.append(summary)
             lines.append("")
 
             link = html.escape(item["link"])
@@ -403,16 +391,18 @@ def build_message(items):
         lines.append("")
 
         for item in other_items:
-            title = html.escape(make_mitrich_line(item["title"], local=False))
-            lines.append(f"{counter}. {title}")
+            title = html.escape(item["title"])
+            summary = html.escape(item.get("summary", ""))
+
+            lines.append(f"{counter}. <b>{title}</b>")
+            if summary:
+                lines.append(summary)
             lines.append("")
 
             link = html.escape(item["link"])
             source = html.escape(item["source"])
             links.append(f"{counter}. <a href=\"{link}\">{source}</a>")
             counter += 1
-
-    lines.append(random.choice(ENDING_VARIANTS))
 
     return "\n".join(lines + links)
 
