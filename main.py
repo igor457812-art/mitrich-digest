@@ -209,27 +209,31 @@ def build_message(items):
     if not items:
         return (
             f"☕ <b>Дайджест Митрича — {today}</b>\n\n"
-            "Сегодня Митрич ничего приличного для чтения не нашёл. "
-            "В лентах шумно, а нам такое в избу не надо."
+            "Покопался я тут в интернете…\n"
+            "но сегодня ничего приличного не нашёл.\n"
+            "Один шум да суета."
         )
 
-    lines = [
+    intro = [
         f"☕ <b>Дайджест Митрича — {today}</b>",
         "",
-        "Новости без грязи и лишней тревоги:",
+        "Покопался я тут на своём втором пентюме…",
+        "в интернете кое-что интересное нашёл:",
         "",
     ]
 
-    for item in items:
+    news_lines = []
+    links_lines = ["", "<b>Откуда это всё:</b>"]
+
+    for i, item in enumerate(items, 1):
         title = html.escape(item["title"])
         link = html.escape(item["link"])
         source = html.escape(item["source"])
 
-        lines.append(f"• <a href=\"{link}\">{title}</a>")
-        lines.append(f"  <i>{source}</i>")
-        lines.append("")
+        news_lines.append(f"{i}. {title}")
+        links_lines.append(f"{i}. <a href=\"{link}\">{source}</a>")
 
-    return "\n".join(lines)
+    return "\n".join(intro + news_lines + links_lines)
 
 
 def send_message(text):
