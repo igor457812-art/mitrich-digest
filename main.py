@@ -14,13 +14,6 @@ CHAT_ID = os.environ.get("CHAT_ID")
 
 
 FEEDS = [
-    ("Лента.ру", "https://lenta.ru/rss"),
-    ("РИА Новости", "https://ria.ru/export/rss2/index.xml"),
-    ("Газета.ру", "https://www.gazeta.ru/export/rss/first.xml"),
-    ("Коммерсант", "https://www.kommersant.ru/RSS/main.xml"),
-    ("Российская газета", "https://rg.ru/xml/index.xml"),
-    ("РБК", "https://rss.rbk.ru/v1/get/all"),
-
     ("Лента — Наука", "https://lenta.ru/rss/news/science"),
     ("РИА — Наука", "https://ria.ru/export/rss2/science/index.xml"),
     ("Naked Science", "https://naked-science.ru/feed"),
@@ -28,6 +21,8 @@ FEEDS = [
 
     ("Кашин — новости", "https://news.google.com/rss/search?q=Кашин+Тверская+область&hl=ru&gl=RU&ceid=RU:ru"),
     ("Калязин и Кашин", "https://news.google.com/rss/search?q=Калязин+Кашин+новости&hl=ru&gl=RU&ceid=RU:ru"),
+    ("Тверь — интересное", "https://news.google.com/rss/search?q=Тверская+область+интересное+культура+туризм+музей&hl=ru&gl=RU&ceid=RU:ru"),
+    ("Россия — интересное", "https://news.google.com/rss/search?q=Россия+необычное+наука+история+археология+животные&hl=ru&gl=RU&ceid=RU:ru"),
 ]
 
 
@@ -46,6 +41,19 @@ BAD_WORDS = [
     "грязная вода", "плохая вода", "канализация", "отключение воды",
     "навальный", "санкции", "трамп", "иран", "украин",
     "наркот", "алкогол", "пьяный", "избил", "розыск",
+
+    "подписк", "забрать", "промокод", "скидк", "акция", "реклама",
+    "наш чат", "мы в max", "прислать новость", "ссылка ниже",
+    "обход", "глушил", "мобильного интернета", "vpn", "заработок",
+
+    "продается", "продаётся", "продам", "куплю", "аренда", "сдается",
+    "сдаётся", "квартира", "однокомнатная", "двухкомнатная",
+    "трехкомнатная", "трёхкомнатная", "комнат", "цена", "ипотека",
+    "дом кирпичный", "санузел", "балкон",
+
+    "обсудили", "заявил", "заявила", "заявили", "пригрозил",
+    "правительство", "министр", "депутат", "госдума", "совещание",
+    "санкц", "переговор", "конфликт",
 ]
 
 
@@ -72,8 +80,9 @@ GOOD_WORDS = [
     "необыч", "редк", "курьёз", "курьез", "интересн",
     "дети", "школ", "учитель", "культура", "театр", "книга",
     "добровол", "помог", "открыли", "создали", "изобрели",
-    "площад", "дорог", "ремонт", "золотое кольцо",
-    "туризм", "турист", "благоустр", "конкурс", "природ", "река",
+    "площад", "благоустр", "золотое кольцо",
+    "туризм", "турист", "конкурс", "природ", "река",
+    "ретро", "гараж", "парк", "мастер", "ремесл",
 ]
 
 
@@ -101,6 +110,11 @@ def clean_title(title):
     return " ".join(title.replace("\n", " ").replace("\r", " ").split())
 
 
+def is_local(title):
+    text = title.lower()
+    return "каш" in text or "каляз" in text or "твер" in text
+
+
 def is_bad(title):
     text = title.lower()
 
@@ -114,6 +128,10 @@ def is_bad(title):
         return True
 
     return False
+
+
+def is_too_long_for_telegram_source(text):
+    return len(text) > 220
 
 
 def is_recent_entry(entry, max_days=21):
@@ -139,64 +157,63 @@ def score_news(title, source):
             score += 2
 
     if "каш" in text:
-        score += 10
+        score += 12
 
     if "каляз" in text:
-        score += 5
+        score += 7
 
     if "твер" in text:
-        score += 3
+        score += 4
 
     if "монет" in text or "археолог" in text or "история" in text:
-        score += 5
+        score += 6
 
     if "золотое кольцо" in text or "туризм" in text:
         score += 5
 
+    if "ретро" in text or "музей" in text or "выставка" in text:
+        score += 5
+
     if "наука" in source.lower() or "naked science" in source.lower() or "хайтек" in source.lower():
-        score += 2
+        score += 3
 
     return score
 
 
-def make_mitrich_line(title):
+def make_mitrich_line(title, local=False):
     text = clean_title(title)
 
-    replacements = [
-        ("В Тверской области ", "В Тверской области "),
-        ("стало известно", "пишут"),
-        ("сообщили", "пишут"),
-        ("рассказали", "рассказывают"),
-        ("назвали", "назвали"),
-    ]
-
-    for old, new in replacements:
-        text = text.replace(old, new)
-
-    starters = [
-        "Тут пишут: ",
-        "Попалось такое: ",
-        "Есть вот такая новость: ",
-        "А вот это занятно: ",
-        "Вот ещё интересное: ",
-        "Гляньте, что нашлось: ",
-    ]
-
-    comments = [
-        "Нормальная тема, без лишней паники.",
-        "Такое уже можно спокойно читать.",
-        "Не сенсация века, но любопытно.",
-        "Для маленьких городов такие вещи важны.",
-        "Вот это ближе к жизни.",
-        "Записал в хорошие находки.",
-    ]
-
-    starter = random.choice(starters)
+    if local:
+        starters = [
+            "Из наших краёв: ",
+            "По Кашину и рядом попалось: ",
+            "Местное нашлось такое: ",
+            "Вот из ближнего: ",
+        ]
+        comments = [
+            "Такое Митрич отдельно записал.",
+            "Это уже ближе к дому.",
+            "За такими новостями и следим.",
+            "Вот это в нашу копилку.",
+        ]
+    else:
+        starters = [
+            "А из большого интернета вот что: ",
+            "Для разбавки — интересная штука: ",
+            "Ещё попалось занятное: ",
+            "Из не местного, но любопытного: ",
+        ]
+        comments = [
+            "Не сенсация века, но любопытно.",
+            "Такое уже можно спокойно читать.",
+            "Хоть какая-то польза от интернета.",
+            "Записал в хорошие находки.",
+        ]
 
     if random.random() < 0.45:
-        return f"{starter}{text}. {random.choice(comments)}"
+        return f"{random.choice(starters)}{text}. {random.choice(comments)}"
 
-    return f"{starter}{text}."
+    return f"{random.choice(starters)}{text}."
 
 
 def get_telegram_news():
@@ -214,17 +231,22 @@ def get_telegram_news():
             soup = BeautifulSoup(response.text, "html.parser")
             messages = soup.select(".tgme_widget_message")
 
-            for message in messages[-12:]:
+            for message in messages[-15:]:
                 text_block = message.select_one(".tgme_widget_message_text")
                 link_block = message.select_one(".tgme_widget_message_date")
 
                 if not text_block:
                     continue
 
-                text = text_block.get_text(" ", strip=True)
-                text = clean_title(text)
+                text = clean_title(text_block.get_text(" ", strip=True))
 
                 if not text or len(text) < 40:
+                    continue
+
+                if is_too_long_for_telegram_source(text):
+                    continue
+
+                if is_bad(text):
                     continue
 
                 link = url
@@ -233,7 +255,7 @@ def get_telegram_news():
 
                 items.append({
                     "source": source_name,
-                    "title": text[:280],
+                    "title": text,
                     "link": link,
                 })
 
@@ -251,7 +273,7 @@ def collect_news():
         try:
             feed = feedparser.parse(feed_url)
 
-            for entry in feed.entries[:8]:
+            for entry in feed.entries[:10]:
                 if not is_recent_entry(entry):
                     continue
 
@@ -281,6 +303,7 @@ def collect_news():
                     "title": title,
                     "link": link,
                     "score": score,
+                    "local": is_local(title),
                 })
 
             time.sleep(0.5)
@@ -288,9 +311,7 @@ def collect_news():
         except Exception as error:
             print(f"Ошибка источника {source_name}: {error}")
 
-    tg_items = get_telegram_news()
-
-    for item in tg_items:
+    for item in get_telegram_news():
         title = item["title"]
         title_key = title.lower()
 
@@ -312,10 +333,31 @@ def collect_news():
             "title": title,
             "link": item["link"],
             "score": score,
+            "local": is_local(title),
         })
 
-    items.sort(key=lambda x: x["score"], reverse=True)
-    return items[:5]
+    local_items = [item for item in items if item["local"]]
+    other_items = [item for item in items if not item["local"]]
+
+    local_items.sort(key=lambda x: x["score"], reverse=True)
+    other_items.sort(key=lambda x: x["score"], reverse=True)
+
+    result = []
+
+    result.extend(local_items[:2])
+
+    for item in other_items:
+        if len(result) >= 5:
+            break
+        result.append(item)
+
+    if len(result) < 5:
+        for item in local_items[2:]:
+            if len(result) >= 5:
+                break
+            result.append(item)
+
+    return result[:5]
 
 
 def build_message(items):
@@ -329,6 +371,9 @@ def build_message(items):
             "Подождём нормальных новостей."
         )
 
+    local_items = [item for item in items if item["local"]]
+    other_items = [item for item in items if not item["local"]]
+
     lines = [
         f"☕ <b>Дайджест Митрича — {today}</b>",
         "",
@@ -337,16 +382,35 @@ def build_message(items):
     ]
 
     links = ["", "<b>Источники, чтобы всё было по-честному:</b>"]
+    counter = 1
 
-    for i, item in enumerate(items, 1):
-        title = html.escape(make_mitrich_line(item["title"]))
-        link = html.escape(item["link"])
-        source = html.escape(item["source"])
-
-        lines.append(f"{i}. {title}")
+    if local_items:
+        lines.append("<b>Из наших краёв:</b>")
         lines.append("")
 
-        links.append(f"{i}. <a href=\"{link}\">{source}</a>")
+        for item in local_items:
+            title = html.escape(make_mitrich_line(item["title"], local=True))
+            lines.append(f"{counter}. {title}")
+            lines.append("")
+
+            link = html.escape(item["link"])
+            source = html.escape(item["source"])
+            links.append(f"{counter}. <a href=\"{link}\">{source}</a>")
+            counter += 1
+
+    if other_items:
+        lines.append("<b>Для разбавки:</b>")
+        lines.append("")
+
+        for item in other_items:
+            title = html.escape(make_mitrich_line(item["title"], local=False))
+            lines.append(f"{counter}. {title}")
+            lines.append("")
+
+            link = html.escape(item["link"])
+            source = html.escape(item["source"])
+            links.append(f"{counter}. <a href=\"{link}\">{source}</a>")
+            counter += 1
 
     lines.append(random.choice(ENDING_VARIANTS))
 
