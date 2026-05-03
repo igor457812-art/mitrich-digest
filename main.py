@@ -63,6 +63,16 @@ ADVERTISEMENT_WORDS = [
 ]
 
 
+HIDDEN_PROMO_WORDS = [
+    "попробуйте", "перейдите", "подробнее по ссылке", "ссылка в описании",
+    "ссылка ниже", "бота который", "бота, который", "телеграм бот",
+    "телеграм-бот", "telegram bot", "поддержать проект",
+    "зарегистрируйтесь", "регистрация по ссылке", "участвуйте в акции",
+    "участвуйте в розыгрыше", "переходите", "жмите", "напишите в бот",
+    "наш бот", "бот поможет", "бот для", "переходите по ссылке",
+]
+
+
 HARD_TRASH_WORDS = [
     "убил", "убийство", "убийца", "погиб", "погибли", "погибший",
     "смерть", "умер", "скончался", "скончалась", "труп",
@@ -78,6 +88,33 @@ HARD_TRASH_WORDS = [
     "санкции", "суд", "приговор", "арест", "задержан", "задержали",
     "розыск", "наркот", "кладбище", "кладбища", "захоронение",
     "могила", "ритуальн", "трагедия", "трагедии", "чп",
+]
+
+
+HEAVY_DRAMA_WORDS = [
+    "passed away", "brain tumor", "brain tumour", "cancer", "died",
+    "funeral", "grief", "death", "in memory of", "memorial",
+    "тяжелая болезнь", "тяжёлая болезнь", "тяжело болен", "тяжело больна",
+    "умер", "умершем", "умершего", "память о погибшем", "память об умершем",
+    "памяти погибшего", "памяти умершего", "онкология", "опухоль",
+]
+
+
+REGIONAL_NEGATIVE_WORDS = [
+    "не может оправиться", "последствия циклона", "разрушения",
+    "разрушен", "разрушена", "разрушены", "завалены", "завалило",
+    "повреждены", "повреждено", "повреждена", "пострадали",
+    "ущерб", "бедствие", "ураган", "сильный ветер повредил",
+]
+
+
+ABSTRACT_PR_WORDS = [
+    "формирование новых подходов", "площадка для диалога",
+    "человеческие инициативы", "ответственное отношение к климату",
+    "лидеры предприниматели эксперты", "лидеры, предприниматели, эксперты",
+    "стратегическая сессия", "экспертная площадка", "новые подходы",
+    "межсекторное взаимодействие", "устойчивое развитие",
+    "ценностно ориентированный", "комплексный подход",
 ]
 
 
@@ -181,7 +218,7 @@ def clean_text(text):
 def normalize_text(text):
     text = clean_text(text).lower()
     text = text.replace("ё", "е")
-    text = re.sub(r"[^a-zа-я0-9 ]+", " ", text)
+    text = re.sub(r"[^a-zа-я0-9_@. ]+", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -251,8 +288,41 @@ def is_advertisement(text):
     return contains_any(text, ADVERTISEMENT_WORDS)
 
 
+def is_hidden_promo(text):
+    normalized = normalize_text(text)
+
+    if contains_any(normalized, HIDDEN_PROMO_WORDS):
+        return True
+
+    if "@" in normalized:
+        return True
+
+    if "участвуйте" in normalized and (
+        "акци" in normalized
+        or "розыгрыш" in normalized
+        or "конкурс" in normalized
+        or "ссылк" in normalized
+        or "зарегистр" in normalized
+    ):
+        return True
+
+    return False
+
+
 def is_hard_trash(text):
     return contains_any(text, HARD_TRASH_WORDS)
+
+
+def is_heavy_drama(text):
+    return contains_any(text, HEAVY_DRAMA_WORDS)
+
+
+def is_regional_negative(text):
+    return contains_any(text, REGIONAL_NEGATIVE_WORDS)
+
+
+def is_abstract_pr(text):
+    return contains_any(text, ABSTRACT_PR_WORDS)
 
 
 def is_medical_emergency(text):
@@ -284,8 +354,14 @@ def rejection_reason(text, category):
     if is_advertisement(text):
         return "реклама или объявление"
 
+    if is_hidden_promo(text):
+        return "скрытая реклама или промо"
+
     if is_medical_emergency(text):
         return "медицина/ЧП"
+
+    if is_heavy_drama(text):
+        return "тяжёлая человеческая драма"
 
     if is_hard_trash(text):
         return "жёсткий негатив"
@@ -293,8 +369,14 @@ def rejection_reason(text, category):
     if has_season_bad(text):
         return "сезонный фильтр"
 
+    if category in ["tver", "world"] and is_regional_negative(text):
+        return "негативная региональная формулировка"
+
     if category in ["tver", "world"] and has_soft_bad(text):
         return "региональный/общий мусор или чиновничья вода"
+
+    if category == "world" and is_abstract_pr(text):
+        return "абстрактный пресс-релиз без человеческой истории"
 
     return ""
 
@@ -304,16 +386,25 @@ def should_reject(text, category):
 
 
 def soft_penalty(text, category):
-    if not has_soft_bad(text):
-        return 0
+    penalty = 0
 
-    if category == "kashin":
-        return 0
+    if has_soft_bad(text):
+        if category == "kashin":
+            penalty += 0
+        elif category == "tver":
+            penalty += 4
+        else:
+            penalty += 6
 
-    if category == "tver":
-        return 4
+    if is_abstract_pr(text):
+        if category == "kashin":
+            penalty += 4
+        elif category == "tver":
+            penalty += 8
+        else:
+            penalty += 12
 
-    return 6
+    return penalty
 
 
 def classify_item(title, summary, source, feed_group):
@@ -881,7 +972,7 @@ def build_message(collected):
         f"☕ <b>Редакторский дайджест Митрича — {today}</b>",
         "",
         f"Проверил RSS, Google News и публичные Telegram-страницы за последние {MAX_HOURS} часов.",
-        "Рекламу, жесть, ЧП и похожие дубли отсеял.",
+        "Рекламу, жесть, ЧП, тяжёлую драму и похожие дубли отсеял.",
         "",
     ]
 
