@@ -126,16 +126,16 @@ def is_bad(text):
     return False
 
 
-def is_recent_entry(entry, max_days=21):
+def is_recent_entry(entry, max_hours=36):
     published = getattr(entry, "published_parsed", None)
     updated = getattr(entry, "updated_parsed", None)
     date_struct = published or updated
 
     if not date_struct:
-        return True
+        return False
 
     entry_date = datetime(*date_struct[:6])
-    min_date = datetime.utcnow() - timedelta(days=max_days)
+    min_date = datetime.utcnow() - timedelta(hours=max_hours)
 
     return entry_date >= min_date
 
@@ -178,7 +178,7 @@ def verdict_for_item(item):
     text = f"{title} {summary}"
 
     if item["local"]:
-        return "🟢 Да. Местная тема, хорошо подходит Митричу."
+        return "🟢 Да. Местная тема, хорошо подходит для выпуска."
 
     if any(word in text for word in ["история", "археолог", "монет", "музей", "ретро", "золотое кольцо"]):
         return "🟢 Да. Можно красиво подать через историю и любопытство."
@@ -190,13 +190,12 @@ def verdict_for_item(item):
 
 
 def explain_item(item):
-    title = item["title"]
     summary = item.get("summary", "")
 
     if summary:
         return short_text(summary, 360)
 
-    return short_text(title, 260)
+    return short_text(item["title"], 260)
 
 
 def get_entry_summary(entry):
@@ -268,7 +267,7 @@ def collect_news():
         try:
             feed = feedparser.parse(feed_url)
 
-            for entry in feed.entries[:10]:
+            for entry in feed.entries[:12]:
                 if not is_recent_entry(entry):
                     continue
 
@@ -368,14 +367,14 @@ def build_message(items):
     if not items:
         return (
             f"☕ <b>Редакторский дайджест Митрича — {today}</b>\n\n"
-            "Сегодня нормальных тем почти не попалось.\n"
-            "Лучше пропустить, чем делать выпуск из мусора."
+            "Сегодня свежих нормальных тем почти не попалось.\n"
+            "Лучше пропустить, чем делать выпуск из старья или мусора."
         )
 
     lines = [
         f"☕ <b>Редакторский дайджест Митрича — {today}</b>",
         "",
-        "Пошуршал по лентам. Ниже — темы, из которых можно лепить выпуск.",
+        "Пошуршал по свежим лентам за последние сутки. Ниже — темы, из которых можно лепить выпуск.",
         "",
     ]
 
@@ -420,7 +419,7 @@ def build_message(items):
             lines.append("")
             counter += 1
 
-    lines.append("Выбирай 1–2 темы — из них уже можно делать голос Митрича.")
+    lines.append("Выбирай 1–2 темы — из них уже можно делать голосовой сценарий.")
 
     return "\n".join(lines)
 
