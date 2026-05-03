@@ -5,6 +5,7 @@ import html
 import time
 import hashlib
 from datetime import datetime, timedelta
+from difflib import SequenceMatcher
 
 import feedparser
 import requests
@@ -50,15 +51,52 @@ TELEGRAM_CHANNELS = [
 ]
 
 
-HARD_BAD_WORDS = [
-    "убил", "убийство", "убийца", "погиб", "погибли", "смерть", "умер",
-    "труп", "насилие", "изнасил", "напал", "нападение", "драка",
-    "авария с пострадав", "дтп с пострадав", "пострадал", "пострадали",
-    "пожар", "взрыв", "теракт", "война", "ракета", "обстрел", "бпла",
-    "дрон", "фронт", "сво", "суд", "приговор", "арест", "задержан",
-    "уголовн", "коррупц", "мошенник", "воровств", "украл", "краж",
-    "наркот", "алкогол", "пьяный", "избил", "розыск", "санкции",
-    "украин", "навальный", "трагедия", "трагедии",
+ADVERTISEMENT_WORDS = [
+    "продается", "продаётся", "продам", "куплю", "аренда", "арендую",
+    "сдается", "сдаётся", "сдам", "квартира", "ипотека", "цена",
+    "стоимость", "скидка", "скидк", "акция", "промокод", "реклама",
+    "подписка", "подписаться", "подпишитесь", "наш чат", "канал в max",
+    "мы в max", "прислать новость", "присылайте новости", "забрать",
+    "заказать", "бронь", "бронирование",
+    "однокомнатная", "двухкомнатная", "трехкомнатная", "трёхкомнатная",
+    "санузел", "балкон", "дом кирпичный", "комнат",
+]
+
+
+HARD_TRASH_WORDS = [
+    "убил", "убийство", "убийца", "погиб", "погибли", "погибший",
+    "смерть", "умер", "скончался", "скончалась", "труп",
+    "пострадал", "пострадали", "пострадавший", "пострадавшие",
+    "насилие", "изнасил", "напал", "нападение", "драка",
+    "криминал", "преступление", "уголовн", "воровств", "украл",
+    "краж", "мошенник", "мошенничество", "коррупц",
+    "дтп", "авария", "сбил", "столкнулись", "столкновение",
+    "пожар", "загорел", "сгорел", "сгорела", "возгорание",
+    "взрыв", "взорвался", "взорвалась", "теракт",
+    "беспилотник", "беспилотники", "бпла", "дрон", "дроны",
+    "ракета", "обстрел", "фронт", "война", "сво", "украин",
+    "санкции", "суд", "приговор", "арест", "задержан", "задержали",
+    "розыск", "наркот", "кладбище", "кладбища", "захоронение",
+    "могила", "ритуальн", "трагедия", "трагедии", "чп",
+]
+
+
+MEDICAL_EMERGENCY_WORDS = [
+    "санитарный вертолет", "санитарный вертолёт", "санавиация",
+    "медицинская эвакуация", "медицинской эвакуации",
+    "госпитализация", "госпитализировали", "госпитализирован",
+    "доставили в больницу", "доставлен в больницу", "экстренно доставили",
+    "экстренная помощь", "реанимация", "реанимобиль",
+    "тяжелая болезнь", "тяжёлая болезнь", "тяжело болен", "тяжело больна",
+    "опухоль", "онкология", "онкологическое", "рак мозга", "инсульт",
+    "инфаркт", "кома",
+]
+
+
+MCHS_EMERGENCY_CONTEXT_WORDS = [
+    "мчс", "спасатели", "эвакуация", "эвакуировали", "спасли",
+    "чп", "происшествие", "авария", "дтп", "пожар", "пострадал",
+    "пострадали", "погиб", "погибли", "госпитализ",
 ]
 
 
@@ -66,13 +104,7 @@ SOFT_BAD_WORDS = [
     "штраф", "грязная вода", "плохая вода", "канализация", "отключение воды",
     "обсудили", "заявил", "заявила", "заявили", "правительство", "министр",
     "депутат", "госдума", "совещание", "переговор", "конфликт",
-    "подписк", "забрать", "промокод", "скидк", "акция", "реклама",
-    "наш чат", "мы в max", "прислать новость", "ссылка ниже",
     "обход", "глушил", "мобильного интернета", "vpn", "заработок",
-    "продается", "продаётся", "продам", "куплю", "аренда", "сдается",
-    "сдаётся", "квартира", "однокомнатная", "двухкомнатная",
-    "трехкомнатная", "трёхкомнатная", "комнат", "цена", "ипотека",
-    "дом кирпичный", "санузел", "балкон",
 ]
 
 
@@ -127,6 +159,13 @@ TVER_WORDS = [
     "тверь", "тверская область", "тверской области", "тверском",
     "тверской", "кимры", "бежецк", "торжок", "ржев", "осташков",
     "старица", "лихославль", "вышний волочек", "удомля",
+]
+
+
+STOP_DUPLICATE_WORDS = [
+    "в", "на", "и", "а", "по", "для", "из", "от", "до", "о", "об", "с",
+    "со", "у", "к", "ко", "за", "при", "это", "как", "что", "где",
+    "новости", "новость", "тверской", "области", "тверская", "область",
 ]
 
 
@@ -204,6 +243,182 @@ def split_message(text, limit=TELEGRAM_MESSAGE_LIMIT):
     return parts
 
 
+def log_skip(reason, source, title_or_text):
+    print(f"Пропущено: {reason}. Источник: {source}. Текст: {short_text(title_or_text, 160)}")
+
+
+def is_advertisement(text):
+    return contains_any(text, ADVERTISEMENT_WORDS)
+
+
+def is_hard_trash(text):
+    return contains_any(text, HARD_TRASH_WORDS)
+
+
+def is_medical_emergency(text):
+    normalized = normalize_text(text)
+
+    if contains_any(normalized, MEDICAL_EMERGENCY_WORDS):
+        return True
+
+    has_mchs = "мчс" in normalized or "спасател" in normalized
+    has_emergency_context = contains_any(normalized, MCHS_EMERGENCY_CONTEXT_WORDS)
+
+    if has_mchs and has_emergency_context:
+        return True
+
+    return False
+
+
+def has_soft_bad(text):
+    return contains_any(text, SOFT_BAD_WORDS) or contains_any(text, BUREAUCRACY_WORDS)
+
+
+def has_season_bad(text):
+    current_month = datetime.now().month
+    seasonal_bad_words = SEASON_BAD_MONTHS.get(current_month, [])
+    return contains_any(text, seasonal_bad_words)
+
+
+def rejection_reason(text, category):
+    if is_advertisement(text):
+        return "реклама или объявление"
+
+    if is_medical_emergency(text):
+        return "медицина/ЧП"
+
+    if is_hard_trash(text):
+        return "жёсткий негатив"
+
+    if has_season_bad(text):
+        return "сезонный фильтр"
+
+    if category in ["tver", "world"] and has_soft_bad(text):
+        return "региональный/общий мусор или чиновничья вода"
+
+    return ""
+
+
+def should_reject(text, category):
+    return bool(rejection_reason(text, category))
+
+
+def soft_penalty(text, category):
+    if not has_soft_bad(text):
+        return 0
+
+    if category == "kashin":
+        return 0
+
+    if category == "tver":
+        return 4
+
+    return 6
+
+
+def classify_item(title, summary, source, feed_group):
+    text = f"{title} {summary} {source}"
+
+    if feed_group == "local":
+        return "kashin"
+
+    if feed_group == "regional":
+        return "tver"
+
+    if contains_any(text, KASHIN_WORDS):
+        return "kashin"
+
+    if contains_any(text, TVER_WORDS):
+        return "tver"
+
+    return "world"
+
+
+def tokenize_for_duplicate(text):
+    normalized = normalize_text(text)
+    words = normalized.split()
+
+    result = []
+    for word in words:
+        if len(word) < 4:
+            continue
+        if word in STOP_DUPLICATE_WORDS:
+            continue
+        result.append(word)
+
+    return set(result)
+
+
+def event_signature(title, summary, category):
+    text = normalize_text(f"{title} {summary}")
+    tokens = tokenize_for_duplicate(text)
+
+    places = []
+    for place in ["кашин", "калязин", "кесова", "тверь", "кимры", "бежецк", "торжок", "ржев", "осташков"]:
+        if place in text:
+            places.append(place)
+
+    museum_words = ["музей", "ретро", "гараж", "советск", "эпох"]
+    if any(word in text for word in museum_words):
+        base = "museum_retro"
+    elif "выставк" in text:
+        base = "exhibition"
+    elif "фестивал" in text or "праздник" in text:
+        base = "event"
+    elif "ремонт" in text or "дорог" in text or "улиц" in text:
+        base = "city_works"
+    else:
+        important = sorted(tokens)[:5]
+        base = "_".join(important)
+
+    place_part = "_".join(places) if places else category
+    return f"{place_part}_{base}"
+
+
+def is_similar_title(title_a, title_b):
+    norm_a = normalize_text(title_a)
+    norm_b = normalize_text(title_b)
+
+    if not norm_a or not norm_b:
+        return False
+
+    ratio = SequenceMatcher(None, norm_a, norm_b).ratio()
+    if ratio >= 0.74:
+        return True
+
+    tokens_a = tokenize_for_duplicate(norm_a)
+    tokens_b = tokenize_for_duplicate(norm_b)
+
+    if not tokens_a or not tokens_b:
+        return False
+
+    intersection = tokens_a.intersection(tokens_b)
+    union = tokens_a.union(tokens_b)
+
+    if len(intersection) >= 3 and len(intersection) / len(union) >= 0.34:
+        return True
+
+    return False
+
+
+def find_duplicate_index(items, title, summary, category):
+    new_signature = event_signature(title, summary, category)
+
+    for index, item in enumerate(items):
+        if item["category"] != category:
+            continue
+
+        old_signature = event_signature(item["title"], item.get("summary", ""), item["category"])
+
+        if old_signature == new_signature:
+            return index
+
+        if is_similar_title(title, item["title"]):
+            return index
+
+    return None
+
+
 def make_memory_key(title, link):
     normalized_title = normalize_text(title)
     normalized_link = clean_text(link).strip().lower()
@@ -272,6 +487,9 @@ def is_seen(title, link, memory):
         if normalized_title and old_title and normalized_title == old_title:
             return True
 
+        if is_similar_title(normalized_title, old_title):
+            return True
+
     return False
 
 
@@ -289,61 +507,6 @@ def remember_items(items, memory):
         }
 
     save_memory(memory)
-
-
-def has_hard_bad(text):
-    return contains_any(text, HARD_BAD_WORDS)
-
-
-def has_soft_bad(text):
-    return contains_any(text, SOFT_BAD_WORDS) or contains_any(text, BUREAUCRACY_WORDS)
-
-
-def has_season_bad(text):
-    current_month = datetime.now().month
-    seasonal_bad_words = SEASON_BAD_MONTHS.get(current_month, [])
-    return contains_any(text, seasonal_bad_words)
-
-
-def should_reject(text, category):
-    if has_hard_bad(text):
-        return True
-
-    if has_season_bad(text):
-        return True
-
-    return False
-
-
-def soft_penalty(text, category):
-    if not has_soft_bad(text):
-        return 0
-
-    if category == "kashin":
-        return 0
-
-    if category == "tver":
-        return 4
-
-    return 6
-
-
-def classify_item(title, summary, source, feed_group):
-    text = f"{title} {summary} {source}"
-
-    if feed_group == "local":
-        return "kashin"
-
-    if feed_group == "regional":
-        return "tver"
-
-    if contains_any(text, KASHIN_WORDS):
-        return "kashin"
-
-    if contains_any(text, TVER_WORDS):
-        return "tver"
-
-    return "world"
 
 
 def is_recent_entry(entry, max_hours=MAX_HOURS):
@@ -427,12 +590,7 @@ def verdict_for_item(item):
         return "🟢 Местная тема. Для кашинского блока подходит."
 
     if item["category"] == "tver":
-        if has_soft_bad(text):
-            return "🟡 Областная тема, но спорная по тону. Нужна ручная проверка."
         return "🟢 Нормальная областная тема для выпуска."
-
-    if has_soft_bad(text):
-        return "🟡 Спорно. Для России/мира брать только если смысл действительно человеческий."
 
     if any(word in text for word in ["история", "археолог", "монет", "музей", "ретро", "золотое кольцо"]):
         return "🟢 Хорошая. Можно подать через любопытство и историю."
@@ -489,21 +647,20 @@ def get_telegram_news():
                     continue
 
                 if len(full_text) > 1200:
-                    print(
-                        f"Пропущен Telegram-пост: слишком длинный текст — "
-                        f"{len(full_text)} символов, источник: {source_name}"
+                    log_skip(
+                        "слишком длинный Telegram-пост",
+                        source_name,
+                        f"{len(full_text)} символов"
                     )
                     continue
 
                 title = short_text(full_text, 120)
                 summary = short_text(full_text, 360)
                 category = classify_item(title, summary, source_name, "local")
+                reason = rejection_reason(full_text, category)
 
-                if should_reject(full_text, category):
-                    print(
-                        f"Пропущен Telegram-пост: жёсткий негатив или сезонный фильтр, "
-                        f"источник: {source_name}, текст: {short_text(full_text, 120)}"
-                    )
+                if reason:
+                    log_skip(reason, source_name, full_text)
                     continue
 
                 link = url
@@ -531,15 +688,19 @@ def add_item(items, seen_titles, memory, source, title, summary, link, feed_grou
     category = classify_item(title, summary, source, feed_group)
     check_text = f"{title} {summary}"
 
-    if should_reject(check_text, category):
+    reason = rejection_reason(check_text, category)
+    if reason:
+        log_skip(reason, source, title)
         return
 
     title_key = normalize_text(title)
 
     if title_key in seen_titles:
+        log_skip("точный дубль в текущем запуске", source, title)
         return
 
     if is_seen(title, link, memory):
+        log_skip("дубль по памяти", source, title)
         return
 
     score = score_news(title, summary, source, category)
@@ -552,18 +713,37 @@ def add_item(items, seen_titles, memory, source, title, summary, link, feed_grou
         min_score = 4
 
     if score < min_score:
+        log_skip(f"низкий score {score}", source, title)
         return
 
-    seen_titles.add(title_key)
+    duplicate_index = find_duplicate_index(items, title, summary, category)
 
-    items.append({
+    new_item = {
         "source": source,
         "title": title,
         "summary": summary,
         "link": link,
         "score": score,
         "category": category,
-    })
+    }
+
+    if duplicate_index is not None:
+        old_item = items[duplicate_index]
+
+        if score > old_item["score"]:
+            print(
+                f"Заменён похожий дубль: '{short_text(old_item['title'], 90)}' "
+                f"→ '{short_text(title, 90)}'"
+            )
+            items[duplicate_index] = new_item
+            seen_titles.add(title_key)
+        else:
+            log_skip("похожий дубль в текущем запуске", source, title)
+
+        return
+
+    seen_titles.add(title_key)
+    items.append(new_item)
 
 
 def get_all_feeds():
@@ -701,7 +881,7 @@ def build_message(collected):
         f"☕ <b>Редакторский дайджест Митрича — {today}</b>",
         "",
         f"Проверил RSS, Google News и публичные Telegram-страницы за последние {MAX_HOURS} часов.",
-        "Жёсткий негатив отсеял. Местные темы смотрю мягче: для маленького города это правильно.",
+        "Рекламу, жесть, ЧП и похожие дубли отсеял.",
         "",
     ]
 
