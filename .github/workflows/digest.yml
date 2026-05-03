@@ -3,8 +3,8 @@ name: Send Telegram Digest
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 6 * * *"
-
+    - cron: "17 2 * * *"
+    - cron: "47 6 * * *"
 jobs:
   send-digest:
     runs-on: ubuntu-latest
