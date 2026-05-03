@@ -17,6 +17,7 @@ CHAT_ID = os.environ.get("CHAT_ID")
 MEMORY_FILE = "sent_news.json"
 MEMORY_DAYS = 14
 MAX_HOURS = 48
+TELEGRAM_MESSAGE_LIMIT = 3800
 
 
 LOCAL_FEEDS = [
@@ -164,6 +165,43 @@ def short_text(text, limit=360):
         return cut[:last_dot + 1]
 
     return cut.rstrip() + "…"
+
+
+def split_message(text, limit=TELEGRAM_MESSAGE_LIMIT):
+    parts = []
+    current = ""
+
+    for line in text.split("\n"):
+        candidate = line if not current else current + "\n" + line
+
+        if len(candidate) <= limit:
+            current = candidate
+            continue
+
+        if current:
+            parts.append(current)
+            current = ""
+
+        if len(line) <= limit:
+            current = line
+        else:
+            while len(line) > limit:
+                cut = line[:limit]
+                last_space = cut.rfind(" ")
+
+                if last_space > 500:
+                    parts.append(line[:last_space])
+                    line = line[last_space:].strip()
+                else:
+                    parts.append(cut)
+                    line = line[limit:].strip()
+
+            current = line
+
+    if current:
+        parts.append(current)
+
+    return parts
 
 
 def make_memory_key(title, link):
@@ -697,19 +735,36 @@ def build_message(collected):
 
 def send_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    parts = split_message(text, TELEGRAM_MESSAGE_LIMIT)
 
-    response = requests.post(
-        url,
-        data={
-            "chat_id": CHAT_ID,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        },
-        timeout=30,
-    )
+    for index, part in enumerate(parts, start=1):
+        try:
+            response = requests.post(
+                url,
+                data={
+                    "chat_id": CHAT_ID,
+                    "text": part,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                },
+                timeout=30,
+            )
+            response.raise_for_status()
+            print(f"Отправлена часть {index}/{len(parts)}, длина: {len(part)} символов")
+            time.sleep(0.5)
 
-    response.raise_for_status()
+        except requests.exceptions.HTTPError as error:
+            print(f"Ошибка Telegram при отправке части {index}/{len(parts)}")
+            print(f"Длина части: {len(part)} символов")
+            print(f"Текст ошибки: {error}")
+            print(f"Ответ Telegram: {response.text}")
+            raise
+
+        except Exception as error:
+            print(f"Неожиданная ошибка Telegram при отправке части {index}/{len(parts)}")
+            print(f"Длина части: {len(part)} символов")
+            print(f"Текст ошибки: {error}")
+            raise
 
 
 if __name__ == "__main__":
