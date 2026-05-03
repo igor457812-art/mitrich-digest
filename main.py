@@ -57,7 +57,7 @@ ADVERTISEMENT_WORDS = [
     "стоимость", "скидка", "скидк", "акция", "промокод", "реклама",
     "подписка", "подписаться", "подпишитесь", "наш чат", "канал в max",
     "мы в max", "прислать новость", "присылайте новости", "забрать",
-    "заказать", "бронь", "бронирование",
+    "заказать", "купить", "бронь", "бронирование", "доставка",
     "однокомнатная", "двухкомнатная", "трехкомнатная", "трёхкомнатная",
     "санузел", "балкон", "дом кирпичный", "комнат",
 ]
@@ -100,6 +100,12 @@ HEAVY_DRAMA_WORDS = [
 ]
 
 
+WORLD_MEDICAL_STOP_WORDS = [
+    "pandemic", "covid", "ambulance", "emergency medical service",
+    "ems", "medical service", "hospital", "disease", "illness",
+]
+
+
 REGIONAL_NEGATIVE_WORDS = [
     "не может оправиться", "последствия циклона", "разрушения",
     "разрушен", "разрушена", "разрушены", "завалены", "завалило",
@@ -109,12 +115,15 @@ REGIONAL_NEGATIVE_WORDS = [
 
 
 ABSTRACT_PR_WORDS = [
-    "формирование новых подходов", "площадка для диалога",
-    "человеческие инициативы", "ответственное отношение к климату",
-    "лидеры предприниматели эксперты", "лидеры, предприниматели, эксперты",
-    "стратегическая сессия", "экспертная площадка", "новые подходы",
-    "межсекторное взаимодействие", "устойчивое развитие",
-    "ценностно ориентированный", "комплексный подход",
+    "формирование новых подходов", "формирования новых подходов",
+    "площадка для диалога", "человеческие инициативы",
+    "человеческих инициатив", "ответственное отношение к климату",
+    "ответственного отношения к климату", "лидеры предприниматели эксперты",
+    "лидеры, предприниматели, эксперты", "стратегическая сессия",
+    "экспертная площадка", "новые подходы", "межсекторное взаимодействие",
+    "устойчивое развитие", "ценностно ориентированный", "комплексный подход",
+    "фестиваль будущего сообществ", "стремительно меняющегося мира",
+    "углеродный след",
 ]
 
 
@@ -182,13 +191,18 @@ GOOD_WORDS = [
     "турист", "конкурс", "природ", "река", "ретро", "гараж", "парк",
     "мастер", "ремесл", "сохранили", "восстановили", "память",
     "ярмарка", "ремонт", "дорога", "двор", "улица", "местные",
-    "жители", "открытие", "встреча", "концерт", "спорт",
+    "жители", "открытие", "встреча", "концерт", "спорт", "эстафета",
 ]
 
 
 KASHIN_WORDS = [
-    "кашин", "кашинский", "кашинского", "кашинском", "калязин",
-    "калязинский", "кесова гора", "кесовогорский",
+    "кашин", "кашинский", "кашинского", "кашинском", "кашинский округ",
+    "кашинского округа", "кашинском округе", "кашине",
+]
+
+
+NEARBY_WORDS = [
+    "калязин", "калязинский", "кесова гора", "кесовогорский",
 ]
 
 
@@ -317,6 +331,10 @@ def is_heavy_drama(text):
     return contains_any(text, HEAVY_DRAMA_WORDS)
 
 
+def is_world_medical_stop(text):
+    return contains_any(text, WORLD_MEDICAL_STOP_WORDS)
+
+
 def is_regional_negative(text):
     return contains_any(text, REGIONAL_NEGATIVE_WORDS)
 
@@ -363,6 +381,9 @@ def rejection_reason(text, category):
     if is_heavy_drama(text):
         return "тяжёлая человеческая драма"
 
+    if category == "world" and is_world_medical_stop(text):
+        return "медицинская тема для Россия/мир"
+
     if is_hard_trash(text):
         return "жёсткий негатив"
 
@@ -375,14 +396,10 @@ def rejection_reason(text, category):
     if category in ["tver", "world"] and has_soft_bad(text):
         return "региональный/общий мусор или чиновничья вода"
 
-    if category == "world" and is_abstract_pr(text):
+    if category in ["tver", "world"] and is_abstract_pr(text):
         return "абстрактный пресс-релиз без человеческой истории"
 
     return ""
-
-
-def should_reject(text, category):
-    return bool(rejection_reason(text, category))
 
 
 def soft_penalty(text, category):
@@ -416,7 +433,7 @@ def classify_item(title, summary, source, feed_group):
     if feed_group == "regional":
         return "tver"
 
-    if contains_any(text, KASHIN_WORDS):
+    if contains_any(text, KASHIN_WORDS) or contains_any(text, NEARBY_WORDS):
         return "kashin"
 
     if contains_any(text, TVER_WORDS):
@@ -443,6 +460,9 @@ def tokenize_for_duplicate(text):
 def event_signature(title, summary, category):
     text = normalize_text(f"{title} {summary}")
     tokens = tokenize_for_duplicate(text)
+
+    if "фотоконкурс" in text and "золот" in text and "кольц" in text:
+        return f"{category}_photo_contest_golden_ring"
 
     places = []
     for place in ["кашин", "калязин", "кесова", "тверь", "кимры", "бежецк", "торжок", "ржев", "осташков"]:
@@ -472,6 +492,10 @@ def is_similar_title(title_a, title_b):
 
     if not norm_a or not norm_b:
         return False
+
+    if "фотоконкурс" in norm_a and "фотоконкурс" in norm_b:
+        if "золот" in norm_a and "золот" in norm_b and "кольц" in norm_a and "кольц" in norm_b:
+            return True
 
     ratio = SequenceMatcher(None, norm_a, norm_b).ratio()
     if ratio >= 0.74:
@@ -616,6 +640,7 @@ def is_recent_entry(entry, max_hours=MAX_HOURS):
 
 def score_news(title, summary, source, category):
     text = f"{title} {summary} {source}".lower()
+    normalized = normalize_text(text)
     score = 0
 
     for word in GOOD_WORDS:
@@ -625,20 +650,26 @@ def score_news(title, summary, source, category):
     if category == "kashin":
         score += 20
 
-    if category == "tver":
-        score += 9
+    if contains_any(normalized, KASHIN_WORDS):
+        score += 20
 
     if "каш" in text:
         score += 12
 
     if "каляз" in text:
-        score += 8
+        score += 5
 
     if "кесова" in text:
-        score += 6
+        score += 4
+
+    if category == "tver":
+        score += 9
 
     if "твер" in text:
         score += 5
+
+    if "эстафет" in text:
+        score += 8
 
     if "монет" in text or "археолог" in text or "история" in text:
         score += 6
@@ -676,9 +707,11 @@ def verdict_for_item(item):
     text = f"{title} {summary}"
 
     if item["category"] == "kashin":
+        if contains_any(text, KASHIN_WORDS):
+            return "🟢 Прямая кашинская тема. Для первого блока подходит лучше всего."
         if has_soft_bad(text):
-            return "🟡 Живая местная тема. Не радостная, но без жести — можно смотреть редактору."
-        return "🟢 Местная тема. Для кашинского блока подходит."
+            return "🟡 Живая местная тема рядом. Можно смотреть редактору."
+        return "🟢 Местная тема рядом. Для кашинского блока подходит, если нет темы сильнее по Кашину."
 
     if item["category"] == "tver":
         return "🟢 Нормальная областная тема для выпуска."
