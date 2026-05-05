@@ -74,10 +74,12 @@ HIDDEN_PROMO_WORDS = [
 
 
 SERVICE_WORDS = [
-    "перекрытие движения", "перекрыто движение", "ограничение движения",
-    "ограничения движения", "движение будет ограничено", "схема движения",
-    "объезд", "предусмотреть объезд", "просим жителей", "внимание важная информация",
-    "внимание! важная информация", "важная информация", "изменение схемы движения",
+    "внимание важная информация", "внимание! важная информация",
+    "важная информация", "перекрытие движения", "перекрыто движение",
+    "будет перекрыто", "ограничение движения", "ограничения движения",
+    "движение будет ограничено", "схема движения", "согласно схеме",
+    "объезд", "предусмотреть объезд", "просим жителей заранее",
+    "просим жителей", "просим гостей города", "изменение схемы движения",
     "временное ограничение", "будет закрыт проезд", "закрытие движения",
     "движение транспорта", "маршрут объезда", "заранее планировать маршрут",
 ]
@@ -85,10 +87,13 @@ SERVICE_WORDS = [
 
 WEAK_LOCAL_WORDS = [
     "посетил", "посетила", "посетили", "принял участие", "приняла участие",
-    "приняли участие", "выражаем благодарность", "от лица родителей",
+    "приняли участие", "вместе со школьниками посетил",
+    "выразили благодарность", "выражаем благодарность",
+    "от лица родителей выражаем благодарность", "от лица родителей",
     "благодарим", "встретился", "встретилась", "побывал", "побывала",
     "ознакомился", "ознакомилась", "площадку", "рабочая поездка",
-    "в рамках визита", "обсудили", "провел встречу", "провёл встречу",
+    "рабочая встреча", "в рамках визита", "обсудили",
+    "провел встречу", "провёл встречу", "провёл совещание", "провел совещание",
 ]
 
 
@@ -110,6 +115,8 @@ HARD_TRASH_WORDS = [
     "домушник", "ограбил", "ограбление", "проник в дом", "чужая дача",
     "вор", "воровал", "дтп", "авария", "сбил", "столкнулись", "столкновение",
     "пожар", "загорел", "сгорел", "сгорела", "возгорание",
+    "сжигая траву", "сжёг", "сжег", "уничтожил всё", "уничтожил все",
+    "пожар сухой травы", "пал травы",
     "взрыв", "взорвался", "взорвалась", "теракт",
     "беспилотник", "беспилотники", "бпла", "дрон", "дроны",
     "ракета", "обстрел", "фронт", "война", "сво", "украин",
@@ -473,18 +480,31 @@ def soft_penalty(text, category):
 
 
 def classify_item(title, summary, source, feed_group):
-    text = f"{title} {summary} {source}"
+    text_without_source = f"{title} {summary}"
+    full_text = f"{title} {summary} {source}"
 
     if feed_group == "local":
-        return "kashin"
+        if contains_any(text_without_source, KASHIN_WORDS) or contains_any(text_without_source, NEARBY_WORDS):
+            return "kashin"
+
+        if contains_any(text_without_source, TVER_WORDS):
+            return "tver"
+
+        if "безформата" in normalize_text(source):
+            return "kashin"
+
+        if source in ["Администрация Кашина", "Кашин Кайф", "Калязин & Кашин: News"]:
+            return "kashin"
+
+        return "tver"
 
     if feed_group == "regional":
         return "tver"
 
-    if contains_any(text, KASHIN_WORDS) or contains_any(text, NEARBY_WORDS):
+    if contains_any(full_text, KASHIN_WORDS) or contains_any(full_text, NEARBY_WORDS):
         return "kashin"
 
-    if contains_any(text, TVER_WORDS):
+    if contains_any(full_text, TVER_WORDS):
         return "tver"
 
     return "world"
@@ -510,7 +530,7 @@ def event_signature(title, summary, category):
     tokens = tokenize_for_duplicate(text)
 
     if "фотоконкурс" in text and "золот" in text and "кольц" in text:
-        return f"{category}_photo_contest_golden_ring"
+        return "tver_photo_contest_golden_ring"
 
     if "эстафет" in text and ("кашин" in text or "кашинск" in text):
         return "kashin_athletic_relay"
@@ -578,15 +598,12 @@ def find_duplicate_index(items, title, summary, category):
     new_signature = event_signature(title, summary, category)
 
     for index, item in enumerate(items):
-        if item["category"] != category:
-            continue
-
         old_signature = event_signature(item["title"], item.get("summary", ""), item["category"])
 
         if old_signature == new_signature:
             return index
 
-        if is_similar_title(title, item["title"]):
+        if item["category"] == category and is_similar_title(title, item["title"]):
             return index
 
     return None
@@ -775,9 +792,7 @@ def verdict_for_item(item):
     if item["category"] == "kashin":
         if contains_any(text, KASHIN_WORDS):
             return "🟢 Прямая кашинская тема. Для первого блока подходит лучше всего."
-        if has_soft_bad(text):
-            return "🟡 Живая местная тема рядом. Можно смотреть редактору."
-        return "🟢 Местная тема рядом. Для кашинского блока подходит, если нет темы сильнее по Кашину."
+        return "🟡 Местная тема рядом. Брать, если нет темы сильнее по Кашину."
 
     if item["category"] == "tver":
         return "🟢 Нормальная областная тема для выпуска."
@@ -837,11 +852,7 @@ def get_telegram_news():
                     continue
 
                 if len(full_text) > 1200:
-                    log_skip(
-                        "слишком длинный Telegram-пост",
-                        source_name,
-                        f"{len(full_text)} символов"
-                    )
+                    log_skip("слишком длинный Telegram-пост", source_name, f"{len(full_text)} символов")
                     continue
 
                 title = short_text(full_text, 120)
@@ -921,10 +932,7 @@ def add_item(items, seen_titles, memory, source, title, summary, link, feed_grou
         old_item = items[duplicate_index]
 
         if score > old_item["score"]:
-            print(
-                f"Заменён похожий дубль: '{short_text(old_item['title'], 90)}' "
-                f"→ '{short_text(title, 90)}'"
-            )
+            print(f"Заменён похожий дубль: '{short_text(old_item['title'], 90)}' → '{short_text(title, 90)}'")
             items[duplicate_index] = new_item
             seen_titles.add(title_key)
         else:
@@ -970,16 +978,7 @@ def collect_news():
                 link = getattr(entry, "link", "")
                 summary = get_entry_summary(entry)
 
-                add_item(
-                    items=items,
-                    seen_titles=seen_titles,
-                    memory=memory,
-                    source=source_name,
-                    title=title,
-                    summary=summary,
-                    link=link,
-                    feed_group=feed_group,
-                )
+                add_item(items, seen_titles, memory, source_name, title, summary, link, feed_group)
 
             time.sleep(0.5)
 
@@ -988,14 +987,14 @@ def collect_news():
 
     for item in get_telegram_news():
         add_item(
-            items=items,
-            seen_titles=seen_titles,
-            memory=memory,
-            source=item["source"],
-            title=item["title"],
-            summary=item["summary"],
-            link=item["link"],
-            feed_group=item["feed_group"],
+            items,
+            seen_titles,
+            memory,
+            item["source"],
+            item["title"],
+            item["summary"],
+            item["link"],
+            item["feed_group"],
         )
 
     kashin_items = [item for item in items if item["category"] == "kashin"]
@@ -1007,9 +1006,9 @@ def collect_news():
     world_items.sort(key=lambda x: x["score"], reverse=True)
 
     return {
-        "kashin": kashin_items[:2],
-        "tver": tver_items[:2],
-        "world": world_items[:2],
+        "kashin": kashin_items[:5],
+        "tver": tver_items[:4],
+        "world": world_items[:4],
         "memory": memory,
     }
 
@@ -1087,7 +1086,7 @@ def build_message(collected):
 
         if not items:
             if category == "kashin":
-                lines.append("Свежей местной живой темы не нашлось. Для выпуска лучше сделать «Кашинскую строку».")
+                lines.append("Свежей прямой кашинской темы не нашлось. Для выпуска лучше сделать «Кашинскую строку».")
             elif category == "tver":
                 lines.append("Нормальной областной темы пока нет.")
             else:
@@ -1148,10 +1147,5 @@ if __name__ == "__main__":
     message = build_message(collected_news)
     send_message(message)
 
-    all_sent_items = (
-        collected_news["kashin"]
-        + collected_news["tver"]
-        + collected_news["world"]
-    )
-
+    all_sent_items = collected_news["kashin"] + collected_news["tver"] + collected_news["world"]
     remember_items(all_sent_items, collected_news["memory"])
