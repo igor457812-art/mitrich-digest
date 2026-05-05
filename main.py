@@ -73,14 +73,42 @@ HIDDEN_PROMO_WORDS = [
 ]
 
 
+SERVICE_WORDS = [
+    "перекрытие движения", "перекрыто движение", "ограничение движения",
+    "ограничения движения", "движение будет ограничено", "схема движения",
+    "объезд", "предусмотреть объезд", "просим жителей", "внимание важная информация",
+    "внимание! важная информация", "важная информация", "изменение схемы движения",
+    "временное ограничение", "будет закрыт проезд", "закрытие движения",
+    "движение транспорта", "маршрут объезда", "заранее планировать маршрут",
+]
+
+
+WEAK_LOCAL_WORDS = [
+    "посетил", "посетила", "посетили", "принял участие", "приняла участие",
+    "приняли участие", "выражаем благодарность", "от лица родителей",
+    "благодарим", "встретился", "встретилась", "побывал", "побывала",
+    "ознакомился", "ознакомилась", "площадку", "рабочая поездка",
+    "в рамках визита", "обсудили", "провел встречу", "провёл встречу",
+]
+
+
+STRONG_LOCAL_WORDS = [
+    "открыли", "открылся", "стартовал", "стартовала", "пройдет", "пройдёт",
+    "состоится", "праздник", "фестиваль", "эстафета", "концерт", "выставка",
+    "музей", "ярмарка", "соревнования", "турнир", "ремонт", "благоустройство",
+    "школа", "дети", "спорт", "история", "краевед", "кашинка",
+]
+
+
 HARD_TRASH_WORDS = [
     "убил", "убийство", "убийца", "погиб", "погибли", "погибший",
     "смерть", "умер", "скончался", "скончалась", "труп",
     "пострадал", "пострадали", "пострадавший", "пострадавшие",
     "насилие", "изнасил", "напал", "нападение", "драка",
     "криминал", "преступление", "уголовн", "воровств", "украл",
-    "краж", "мошенник", "мошенничество", "коррупц",
-    "дтп", "авария", "сбил", "столкнулись", "столкновение",
+    "краж", "кража", "мошенник", "мошенничество", "коррупц",
+    "домушник", "ограбил", "ограбление", "проник в дом", "чужая дача",
+    "вор", "воровал", "дтп", "авария", "сбил", "столкнулись", "столкновение",
     "пожар", "загорел", "сгорел", "сгорела", "возгорание",
     "взрыв", "взорвался", "взорвалась", "теракт",
     "беспилотник", "беспилотники", "бпла", "дрон", "дроны",
@@ -323,6 +351,20 @@ def is_hidden_promo(text):
     return False
 
 
+def is_service_info(text):
+    return contains_any(text, SERVICE_WORDS)
+
+
+def is_weak_local(text):
+    if not contains_any(text, WEAK_LOCAL_WORDS):
+        return False
+
+    if contains_any(text, STRONG_LOCAL_WORDS):
+        return False
+
+    return True
+
+
 def is_hard_trash(text):
     return contains_any(text, HARD_TRASH_WORDS)
 
@@ -370,10 +412,16 @@ def has_season_bad(text):
 
 def rejection_reason(text, category):
     if is_advertisement(text):
-        return "реклама или объявление"
+        return "реклама"
 
     if is_hidden_promo(text):
         return "скрытая реклама или промо"
+
+    if is_service_info(text):
+        return "служебная информация"
+
+    if category == "kashin" and is_weak_local(text):
+        return "слабая местная тема"
 
     if is_medical_emergency(text):
         return "медицина/ЧП"
@@ -385,7 +433,7 @@ def rejection_reason(text, category):
         return "медицинская тема для Россия/мир"
 
     if is_hard_trash(text):
-        return "жёсткий негатив"
+        return "криминал или жёсткий негатив"
 
     if has_season_bad(text):
         return "сезонный фильтр"
@@ -464,6 +512,12 @@ def event_signature(title, summary, category):
     if "фотоконкурс" in text and "золот" in text and "кольц" in text:
         return f"{category}_photo_contest_golden_ring"
 
+    if "эстафет" in text and ("кашин" in text or "кашинск" in text):
+        return "kashin_athletic_relay"
+
+    if "перекрыт" in text or "ограничение движения" in text or "схема движения" in text:
+        return f"{category}_traffic_service_info"
+
     places = []
     for place in ["кашин", "калязин", "кесова", "тверь", "кимры", "бежецк", "торжок", "ржев", "осташков"]:
         if place in text:
@@ -495,6 +549,10 @@ def is_similar_title(title_a, title_b):
 
     if "фотоконкурс" in norm_a and "фотоконкурс" in norm_b:
         if "золот" in norm_a and "золот" in norm_b and "кольц" in norm_a and "кольц" in norm_b:
+            return True
+
+    if "эстафет" in norm_a and "эстафет" in norm_b:
+        if "кашин" in norm_a and "кашин" in norm_b:
             return True
 
     ratio = SequenceMatcher(None, norm_a, norm_b).ratio()
@@ -588,16 +646,21 @@ def cleanup_memory(memory):
     return cleaned
 
 
-def is_seen(title, link, memory):
+def is_seen(title, link, memory, summary="", category=""):
     key = make_memory_key(title, link)
 
     if key in memory:
         return True
 
     normalized_title = normalize_text(title)
+    current_signature = event_signature(title, summary, category) if category else ""
 
     for value in memory.values():
         old_title = normalize_text(value.get("title", ""))
+        old_signature = value.get("signature", "")
+
+        if current_signature and old_signature and current_signature == old_signature:
+            return True
 
         if normalized_title and old_title and normalized_title == old_title:
             return True
@@ -612,12 +675,15 @@ def remember_items(items, memory):
     now = datetime.utcnow().isoformat(timespec="seconds")
 
     for item in items:
+        signature = event_signature(item["title"], item.get("summary", ""), item["category"])
         key = make_memory_key(item["title"], item["link"])
+
         memory[key] = {
             "title": item["title"],
             "link": item["link"],
             "source": item["source"],
             "category": item["category"],
+            "signature": signature,
             "sent_at": now,
         }
 
@@ -823,8 +889,8 @@ def add_item(items, seen_titles, memory, source, title, summary, link, feed_grou
         log_skip("точный дубль в текущем запуске", source, title)
         return
 
-    if is_seen(title, link, memory):
-        log_skip("дубль по памяти", source, title)
+    if is_seen(title, link, memory, summary, category):
+        log_skip("дубль события или дубль по памяти", source, title)
         return
 
     score = score_news(title, summary, source, category)
@@ -862,7 +928,7 @@ def add_item(items, seen_titles, memory, source, title, summary, link, feed_grou
             items[duplicate_index] = new_item
             seen_titles.add(title_key)
         else:
-            log_skip("похожий дубль в текущем запуске", source, title)
+            log_skip("дубль события в текущем запуске", source, title)
 
         return
 
@@ -941,9 +1007,9 @@ def collect_news():
     world_items.sort(key=lambda x: x["score"], reverse=True)
 
     return {
-        "kashin": kashin_items[:4],
-        "tver": tver_items[:3],
-        "world": world_items[:3],
+        "kashin": kashin_items[:2],
+        "tver": tver_items[:2],
+        "world": world_items[:2],
         "memory": memory,
     }
 
@@ -1005,7 +1071,7 @@ def build_message(collected):
         f"☕ <b>Редакторский дайджест Митрича — {today}</b>",
         "",
         f"Проверил RSS, Google News и публичные Telegram-страницы за последние {MAX_HOURS} часов.",
-        "Рекламу, жесть, ЧП, тяжёлую драму и похожие дубли отсеял.",
+        "Рекламу, служебные объявления, криминал, жесть, ЧП и повторы событий отсеял.",
         "",
     ]
 
@@ -1032,7 +1098,7 @@ def build_message(collected):
         for index, item in enumerate(items, start=1):
             lines.extend(build_item_lines(item, index))
 
-    lines.append("Для Митрича лучше брать одну тему из каждого блока. Если кашинский блок пустой — делаем «Кашинскую строку», а не заменяем её федеральной новостью.")
+    lines.append("Это не выпуск, а сырьё для редактора. Лучше меньше тем, но чище.")
 
     return "\n".join(lines)
 
